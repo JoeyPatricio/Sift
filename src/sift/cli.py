@@ -26,12 +26,70 @@ def version() -> None:
 
 @app.command()
 def mine(
-    source: str = typer.Option("bugsinpy", help="Source dataset: bugsinpy | swebench-lite | ..."),
-    out: str = typer.Option("data/raw", help="Output directory for mined examples."),
+    split: str = typer.Option("all", help="Split to mine: train | dev | test | all"),
+    out: str = typer.Option("", "--out", help="Output directory (default: config data_dir)."),
+    max_instances: int | None = typer.Option(None, "--max", help="Cap per split for smoke tests."),
+    repo_cache: str = typer.Option("", "--repo-cache", help="Persistent git clone dir."),
+    skip_traceback: bool = typer.Option(False, "--skip-traceback", help="Skip traceback capture."),
 ) -> None:
-    """Mine bug-fix commits into fault-localization examples."""
-    console.print(f"[yellow]mine[/] source={source} out={out}")
-    console.print("[red]Not implemented yet[/] — see sift/data/mining.py for the contract.")
+    """Mine SWE-bench instances into fault-localization Examples.
+
+    Writes {out}/{split}.jsonl for each requested split. Repos are cloned on demand;
+    pass --repo-cache to reuse clones across runs. Use --max 10 --skip-traceback for
+    a fast end-to-end smoke test before committing to the full dataset.
+    """
+    import statistics
+    from pathlib import Path as _Path
+
+    from sift.config import settings
+    from sift.data.mining import VALID_SPLITS, mine_split
+
+    out_dir = _Path(out) if out else settings.data_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    cache_dir = _Path(repo_cache) if repo_cache else None
+    splits_to_run = sorted(VALID_SPLITS) if split == "all" else [split]
+
+    for sp in splits_to_run:
+        out_file = out_dir / f"{sp}.jsonl"
+        console.rule(f"[bold]Mining split: {sp}[/]")
+        console.print(f"Writing → [cyan]{out_file}[/]")
+
+        n_total = 0
+        n_tracebacks = 0
+        candidate_counts: list[int] = []
+
+        with out_file.open("w", encoding="utf-8") as fh:
+            for example in mine_split(
+                sp,
+                repo_cache_dir=cache_dir,
+                max_instances=max_instances,
+                skip_traceback=skip_traceback,
+            ):
+                fh.write(example.model_dump_json() + "\n")
+                n_total += 1
+                if example.traceback:
+                    n_tracebacks += 1
+                candidate_counts.append(len(example.candidate_files))
+                if n_total % 10 == 0:
+                    console.print(f"  {n_total} examples …", end="\r")
+
+        console.print()
+
+        if n_total == 0:
+            console.print(f"  [yellow]No examples written for split '{sp}'.[/]")
+            continue
+
+        tb_pct = 100 * n_tracebacks / n_total
+        candidate_counts.sort()
+        p50 = statistics.median(candidate_counts)
+        p75 = candidate_counts[int(len(candidate_counts) * 0.75)]
+
+        console.print(
+            f"  [green]✓[/] {n_total} examples written\n"
+            f"  tracebacks captured : {n_tracebacks}/{n_total} ({tb_pct:.0f}%)\n"
+            f"  candidate files p50 / p75 : {p50:.0f} / {p75}\n"
+        )
 
 
 @app.command()
