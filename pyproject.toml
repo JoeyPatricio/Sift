@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sift"
+version = "0.1.0"
+description = "Fault localization for failing tests — predict the file and line range responsible, not where the error surfaced."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Joe Patricio", email = "joe.patricio@hotmail.com" }]
+keywords = ["fault-localization", "qlora", "distillation", "bm25", "debugging"]
+
+# Core deps — enough to run retrieval, the eval harness, and the teacher pipeline.
+# The heavy training stack (GPU-only) lives in the optional [train] extra so the
+# repo installs and the eval harness runs on a laptop without CUDA.
+dependencies = [
+    "typer>=0.12",
+    "rich>=13.7",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "rank-bm25>=0.2.2",
+    "datasets>=2.20",
+    "unidiff>=0.7.5",
+    "anthropic>=0.40",
+    "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+# Fine-tuning stack — install on a CUDA box: pip install -e ".[train]"
+train = [
+    "torch>=2.3",
+    "transformers>=4.44",
+    "peft>=0.12",
+    "bitsandbytes>=0.43",
+    "trl>=0.9",
+    "accelerate>=0.33",
+]
+dev = [
+    "pytest>=8.2",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+sift = "sift.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sift"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
