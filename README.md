@@ -22,14 +22,15 @@ cost — see [Scaling Up](#scaling-up) for what a higher budget buys.
 failing test + traceback + repo
           │
           ▼
-   ┌─────────────┐   scope the codebase to the most
-   │  BM25 retr. │   relevant candidate files (keeps
-   └─────────────┘   context tractable without losing recall)
+   ┌─────────────┐   BM25 keyword match + nomic-embed-code
+   │   hybrid    │   cosine similarity; ranked lists merged
+   │   retr.     │   via RRF → top-k candidate files
+   └─────────────┘
           │
           ▼
    ┌─────────────┐   QLoRA-finetuned 3B model predicts
-   │   student   │   { file, start_line, end_line }
-   └─────────────┘
+   │   student   │   ranked { file, start_line, end_line,
+   └─────────────┘   confidence } × 2–3
           │
           ▼
    acc@1 / acc@3 / MRR  vs. the real bug-fix diff
@@ -55,6 +56,10 @@ latency — practical in CI, where a frontier API call per test failure doesn't 
 - **Phase 2 — Teacher distillation** in progress — Haiku teacher, Batches API, train split
 - **Phase 3 — QLoRA fine-tune** pending GPU
 - **Phase 4 — Headline comparison** pending
+- **Phase 5 — Credibility** pending — leakage controls + ablations
+- **Phase 6 — Hybrid retrieval** pending — BM25 + dense embeddings; higher recall ceiling
+- **Phase 7 — Multi-fault + confidence scores** pending — ranked predictions with calibration
+- **Phase 8 — CI/GitHub Action integration** pending — local inference on Actions runner, PR comments
 
 See [docs/roadmap.md](docs/roadmap.md) for the full plan.
 
@@ -73,6 +78,7 @@ pip install -e ".[train]"
 ```bash
 sift mine        --out data/raw              # mine bug-fix commits → examples
 sift retrieve    --example <id>              # BM25 candidate files for one example
+sift embed       --repo .                    # build/update dense embedding cache
 sift distill     --split train --out data/traces.jsonl   # teacher CoT (rejection-sampled)
 sift train       --traces data/traces.jsonl  # QLoRA fine-tune the student
 sift eval        --model <path> --split test # acc@1 / acc@3 / MRR
@@ -110,6 +116,23 @@ meaningfully higher at file and line granularity, at roughly 2–4× the inferen
 **Expected outcome.** This configuration should push file-level acc@1 from the ~35–45% range
 (current target) toward **50–60%**, approaching published frontier-model baselines on
 SWE-bench fault localization — at a fraction of the per-prediction API cost.
+
+## CI Integration
+
+A GitHub Action triggers on test failure, captures the traceback, and runs hybrid retrieval + student inference **locally on the `ubuntu-latest` runner** — no external API calls, no model hosting. The QLoRA-finetuned 3B student (~2–3 GB) fits within the 7 GB runner RAM; CPU inference takes ~30–60 s per failure.
+
+The pre-built embedding cache is stored as a GitHub Actions cache artifact and updated incrementally — only changed files are re-embedded on each push.
+
+The action posts a PR comment with ranked fault predictions linking directly to the file:line range in the diff viewer:
+
+```
+Sift fault localization — 2 candidate locations
+
+1. src/parser/tokenizer.py  L42–58   (confidence 0.81)
+2. src/utils/string_ops.py  L107–112 (confidence 0.54)
+```
+
+See Phase 8 in [docs/roadmap.md](docs/roadmap.md) for implementation details.
 
 ## License
 
